@@ -14,6 +14,10 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
+  // Build host and runtime are node:20-alpine (musl + OpenSSL 3). "native"
+  // alone resolves to the OpenSSL-1.1 musl engine, which fails to load at
+  // runtime (libssl.so.1.1 missing). Pin the OpenSSL-3 musl engine too.
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
