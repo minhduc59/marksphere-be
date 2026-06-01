@@ -51,7 +51,15 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
   }
 
   onModuleInit() {
-    this.pollTimer = setInterval(() => void this.syncProcessingPosts(), POLL_INTERVAL_MS);
+    // Background poll: never let a transient DB/API error escape as an
+    // unhandled rejection — that would crash the whole process.
+    this.pollTimer = setInterval(() => {
+      this.syncProcessingPosts().catch((err) =>
+        this.logger.error(
+          `zernio: syncProcessingPosts failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }, POLL_INTERVAL_MS);
   }
 
   onModuleDestroy() {
