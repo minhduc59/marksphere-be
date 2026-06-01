@@ -23,4 +23,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY package.json ./
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+# ECS injects discrete DB_* secrets; assemble DATABASE_URL (same encoding as
+# src/main.ts), apply Prisma migrations, then start. `migrate deploy` is
+# idempotent and takes an advisory lock, so it's safe across multiple tasks.
+CMD ["sh", "-c", "export DATABASE_URL=$(node -e \"const e=encodeURIComponent,p=process.env;process.stdout.write('postgresql://'+e(p.DB_USER)+':'+e(p.DB_PASSWORD)+'@'+p.DB_HOST+':'+(p.DB_PORT||'5432')+'/'+p.DB_NAME+'?schema=app')\") && npx prisma migrate deploy && node dist/main.js"]
