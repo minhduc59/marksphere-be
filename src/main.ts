@@ -5,6 +5,18 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 
+// ECS injects DB credentials as discrete secrets; Prisma needs a single
+// DATABASE_URL. Assemble it before Nest (and Prisma) initialize.
+if (!process.env.DATABASE_URL) {
+  const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } = process.env;
+  if (DB_HOST && DB_USER && DB_PASSWORD && DB_NAME) {
+    const port = DB_PORT ?? '5432';
+    const user = encodeURIComponent(DB_USER);
+    const pass = encodeURIComponent(DB_PASSWORD);
+    process.env.DATABASE_URL = `postgresql://${user}:${pass}@${DB_HOST}:${port}/${DB_NAME}?schema=app`;
+  }
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   const config = app.get(ConfigService);
