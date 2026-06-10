@@ -77,5 +77,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE scanner IN SCHEMA app
 ALTER DEFAULT PRIVILEGES FOR ROLE scanner IN SCHEMA app
   GRANT ALL ON SEQUENCES TO backend_svc;
 
+-- Alembic's version table lives in `public` (created by scanner during the
+-- migration bootstrap). The ai-service container runs `alembic upgrade head`
+-- on boot as ai_svc, so ai_svc must be able to read/write it.
+ALTER DEFAULT PRIVILEGES FOR ROLE scanner IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ai_svc;
+
 -- pgcrypto for gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
