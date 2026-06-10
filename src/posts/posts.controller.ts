@@ -36,6 +36,7 @@ const CONTENT_STATUSES = [
   'needs_revision',
   'flagged_for_review',
   'published',
+  'failed',
 ] as const;
 
 class UpdateStatusDto {
@@ -151,7 +152,7 @@ export class PostsController {
   @ApiOperation({
     summary: 'Generate posts from a single article URL (express pipeline)',
     description:
-      'Crawls the article, builds a Stage-3-equivalent report, and runs the standard post-generation pipeline. Returns 202 with a `scan_run_id` the client can subscribe to via WebSocket (`scan:<id>`).',
+      'Crawls the article, builds a Stage-3-equivalent report, and runs the standard post-generation pipeline. Returns 202 with a `pipeline_id` the client can subscribe to via WebSocket (`pipeline:<id>`) for unified scan → generate → publish progress.',
   })
   fromArticle(
     @CurrentUser() user: CurrentUserPayload,
@@ -280,5 +281,35 @@ export class PostsController {
     }
 
     return { id, status: newStatus, action: dto.action };
+  }
+
+  @Post(':id/retry')
+  @HttpCode(202)
+  @ApiOperation({
+    summary: 'Retry a post that failed mid-pipeline',
+    description:
+      'For posts in the `failed` state (a pipeline stage errored). Re-runs ' +
+      'generation from scratch via the AI service. No feedback needed — unlike ' +
+      '/review, this is an error recovery, not a quality rejection. Poll ' +
+      'GET /posts/:id to observe the regenerating → draft transition.',
+  })
+  @ApiParam({ name: 'id', description: 'Content post ID (UUID).' })
+  async retry(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const existing = await this.prisma.contentPost.findFirst({
+      where: { id, createdBy: user.userId },
+      select: { id: true, status: true },
+    });
+    if (!existing) throw new NotFoundException('Post not found');
+    if (existing.status !== ContentStatus.failed) {
+      throw new NotFoundException(
+        `Post is not in a failed state (current: ${existing.status})`,
+      );
+    }
+
+    await this.ai.regeneratePost(user.userId, id, { feedback: '' });
+    return { id, status: 'regenerating' };
   }
 }

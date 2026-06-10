@@ -161,4 +161,36 @@ export class AiServiceClient {
   duplicateVideoClip(userId: string, clipId: string) {
     return this.request('POST', `/api/v1/video-clips/${clipId}/duplicate`, userId);
   }
+
+  // ---- Pipeline Runs (end-to-end pipeline orchestration)
+  triggerPipelineRun(userId: string, body: unknown) {
+    return this.request('POST', '/api/v1/pipeline/runs', userId, body);
+  }
+  listPipelineRuns(userId: string, params: Record<string, unknown>) {
+    return this.request(
+      'GET',
+      '/api/v1/pipeline/runs',
+      userId,
+      undefined,
+      params,
+    );
+  }
+  getPipelineRunStatus(userId: string, pipelineId: string) {
+    return this.request(
+      'GET',
+      `/api/v1/pipeline/runs/${pipelineId}/status`,
+      userId,
+    );
+  }
+
+  // ---- Pipeline Config
+  getPipelineConfig(userId: string) {
+    return this.request('GET', '/api/v1/pipeline/config', userId);
+  }
+  createPipelineConfig(userId: string, body: unknown) {
+    return this.request('POST', '/api/v1/pipeline/config', userId, body);
+  }
+  patchPipelineConfig(userId: string, body: unknown) {
+    return this.request('PATCH', '/api/v1/pipeline/config', userId, body);
+  }
 }

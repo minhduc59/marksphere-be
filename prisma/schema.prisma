@@ -211,6 +211,7 @@ enum ContentStatus {
   flagged_for_review
   published
   regenerating
+  failed
 
   @@schema("ai")
 }
@@ -240,6 +241,14 @@ enum PublishStatus {
 enum PublishMode {
   auto
   manual
+
+  @@schema("ai")
+}
+
+enum PipelinePublishMode {
+  auto
+  manual
+  schedule
 
   @@schema("ai")
 }
@@ -345,6 +354,8 @@ model ContentPost {
   revisionCount        Int           @default(0) @map("revision_count")
   humanFeedback        String?       @map("human_feedback")
   lastRevisionTargets  Json?         @map("last_revision_targets")
+  failedStage          String?       @map("failed_stage")
+  errorReason          String?       @map("error_reason")
   isPromoted           Boolean       @default(false) @map("is_promoted")
   filePath             String?       @map("file_path")
   imagePath            String?       @map("image_path")
@@ -380,6 +391,7 @@ model PublishedPost {
   schedulerJobId   String?       @map("scheduler_job_id")
   assembledCaption String?       @map("assembled_caption")
   errorMessage     String?       @map("error_message")
+  failedStage      String?       @map("failed_stage")
   retryCount       Int           @map("retry_count")
   apiResponse      Json?         @map("api_response")
   createdAt        DateTime      @map("created_at")
@@ -529,5 +541,30 @@ model VideoClip {
   @@index([contentPostId])
   @@index([status])
   @@map("video_clips")
+  @@schema("ai")
+}
+
+model PipelineConfig {
+  id                   String              @id @default(uuid()) @db.Uuid
+  ownerId              String?             @map("owner_id") @db.Uuid
+  maxItemsPerPlatform  Int                 @default(50) @map("max_items_per_platform")
+  qualityThreshold     Int                 @default(5) @map("quality_threshold")
+  includeComments      Boolean             @default(true) @map("include_comments")
+  keywords             Json                @default("[]")
+  numPosts             Int                 @default(3) @map("num_posts")
+  allowedFormats       Json?               @map("allowed_formats")
+  requireReview        Boolean             @default(true) @map("require_review")
+  autoApproveThreshold Float               @default(7.0) @map("auto_approve_threshold")
+  autoPublish          Boolean             @default(false) @map("auto_publish")
+  publishMode          PipelinePublishMode @default(auto) @map("publish_mode")
+  scheduledPublishTime String?             @map("scheduled_publish_time")
+  defaultPrivacyLevel  String              @default("SELF_ONLY") @map("default_privacy_level")
+  scanScheduleEnabled  Boolean             @default(false) @map("scan_schedule_enabled")
+  scanCronExpression   String?             @map("scan_cron_expression")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime?           @map("updated_at")
+
+  @@index([ownerId])
+  @@map("pipeline_configs")
   @@schema("ai")
 }

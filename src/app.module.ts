@@ -19,6 +19,8 @@ import { VideoClipsModule } from './video-clips/video-clips.module';
 import { FontsModule } from './fonts/fonts.module';
 import { CaptionTemplatesModule } from './caption-templates/caption-templates.module';
 import { MediaModule } from './media/media.module';
+import { PipelineModule } from './pipeline/pipeline.module';
+import { PipelineRunsModule } from './pipeline-runs/pipeline-runs.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { HealthController } from './common/health.controller';
 
@@ -43,6 +45,8 @@ import { HealthController } from './common/health.controller';
     FontsModule,
     CaptionTemplatesModule,
     MediaModule,
+    PipelineModule,
+    PipelineRunsModule,
   ],
   controllers: [HealthController],
   providers: [
