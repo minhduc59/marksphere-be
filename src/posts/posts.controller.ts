@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
+  HttpStatus,
   Logger,
   NotFoundException,
   Param,
@@ -311,5 +313,18 @@ export class PostsController {
 
     await this.ai.regeneratePost(user.userId, id, { feedback: '' });
     return { id, status: 'regenerating' };
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a post',
+    description:
+      'Hard-deletes a content post (and its publish records via cascade). ' +
+      'Published posts cannot be deleted (returns 409 from the AI service).',
+  })
+  @ApiParam({ name: 'id', description: 'Content post ID (UUID).' })
+  async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
+    return this.ai.deletePost(user.userId, id);
   }
 }

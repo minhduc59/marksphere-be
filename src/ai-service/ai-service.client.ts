@@ -96,6 +96,9 @@ export class AiServiceClient {
       body,
     );
   }
+  deletePost(userId: string, postId: string) {
+    return this.request('DELETE', `/api/v1/posts/${postId}`, userId);
+  }
 
   // ---- Publish
   publishNow(userId: string, postId: string, body: unknown) {
