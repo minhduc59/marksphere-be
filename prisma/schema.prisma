@@ -162,6 +162,7 @@ enum ScanStatus {
 
 enum AiPlatform {
   hackernews
+  article
 
   @@schema("ai")
 }
@@ -256,6 +257,7 @@ enum PipelinePublishMode {
 model ScanRun {
   id                 String     @id @db.Uuid
   triggeredBy        String?    @map("triggered_by") @db.Uuid
+  triggeredType      String?    @map("triggered_type")
   status             ScanStatus
   platformsRequested Json       @map("platforms_requested")
   platformsCompleted Json       @map("platforms_completed")
@@ -561,6 +563,8 @@ model PipelineConfig {
   defaultPrivacyLevel  String              @default("SELF_ONLY") @map("default_privacy_level")
   scanScheduleEnabled  Boolean             @default(false) @map("scan_schedule_enabled")
   scanCronExpression   String?             @map("scan_cron_expression")
+  hnRateLimitPerMin    Int                 @default(60) @map("hn_rate_limit_per_min")
+  hnRetryStrategy      String              @default("exponential") @map("hn_retry_strategy")
   createdAt            DateTime            @default(now()) @map("created_at")
   updatedAt            DateTime?           @map("updated_at")
 

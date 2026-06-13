@@ -88,4 +88,16 @@ export class PipelineConfigDto {
   @IsOptional()
   @IsString()
   scan_cron_expression?: string | null;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 1000, description: 'HackerNews crawler rate limit (requests/min)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(1000)
+  hn_rate_limit_per_min?: number;
+
+  @ApiPropertyOptional({ enum: ['exponential', 'linear', 'immediate'] })
+  @IsOptional()
+  @IsIn(['exponential', 'linear', 'immediate'])
+  hn_retry_strategy?: string;
 }

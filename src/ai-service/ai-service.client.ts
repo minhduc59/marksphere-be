@@ -187,6 +187,9 @@ export class AiServiceClient {
   getPipelineConfig(userId: string) {
     return this.request('GET', '/api/v1/pipeline/config', userId);
   }
+  getPipelineSchedule(userId: string) {
+    return this.request('GET', '/api/v1/pipeline/schedule', userId);
+  }
   createPipelineConfig(userId: string, body: unknown) {
     return this.request('POST', '/api/v1/pipeline/config', userId, body);
   }

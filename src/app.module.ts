@@ -21,6 +21,7 @@ import { CaptionTemplatesModule } from './caption-templates/caption-templates.mo
 import { MediaModule } from './media/media.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { PipelineRunsModule } from './pipeline-runs/pipeline-runs.module';
+import { AdminModule } from './admin/admin.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { HealthController } from './common/health.controller';
 
@@ -47,6 +48,7 @@ import { HealthController } from './common/health.controller';
     MediaModule,
     PipelineModule,
     PipelineRunsModule,
+    AdminModule,
   ],
   controllers: [HealthController],
   providers: [

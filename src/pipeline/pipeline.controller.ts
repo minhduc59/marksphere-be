@@ -29,6 +29,17 @@ export class PipelineController {
     return this.ai.getPipelineConfig(user.userId);
   }
 
+  @Get('schedule')
+  @ApiOperation({
+    summary: "Get the current user's active scan schedule",
+    description:
+      'Returns the active recurring scan schedule (cron, next/last run time), or null when none is set.',
+  })
+  @ApiResponse({ status: 200, description: 'Active scan schedule or null' })
+  getSchedule(@CurrentUser() user: CurrentUserPayload) {
+    return this.ai.getPipelineSchedule(user.userId);
+  }
+
   @Post('config')
   @HttpCode(200)
   @ApiOperation({ summary: 'Create or replace pipeline configuration' })
