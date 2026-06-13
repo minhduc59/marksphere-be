@@ -69,14 +69,42 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
   private async syncProcessingPosts(): Promise<void> {
     const posts = await this.prisma.publishedPost.findMany({
       where: { status: 'processing', tiktokPublishId: { not: null } },
-      select: { id: true, tiktokPublishId: true },
+      select: { id: true, tiktokPublishId: true, contentPostId: true },
     });
     if (posts.length === 0) return;
     this.logger.debug(`zernio: polling ${posts.length} processing post(s)`);
-    await Promise.all(posts.map((p) => this.pollOnePost(p.id, p.tiktokPublishId!)));
+    await Promise.all(
+      posts.map((p) =>
+        this.pollOnePost(p.id, p.tiktokPublishId!, p.contentPostId),
+      ),
+    );
   }
 
-  private async pollOnePost(publishedPostId: string, zernioPostId: string): Promise<void> {
+  /**
+   * Mirror a successful publish onto the owning content post. The Zernio flow
+   * only tracks PublishStatus on `published_posts`; without this the content
+   * post stays at `approved`, so `GET /posts?status=published` (which filters
+   * `ai.content_posts.status`) returns nothing. `backend_svc` holds UPDATE
+   * grant on `ai.content_posts` for exactly this read-path mirror.
+   */
+  private async markContentPostPublished(contentPostId: string): Promise<void> {
+    try {
+      await this.prisma.contentPost.update({
+        where: { id: contentPostId },
+        data: { status: 'published', updatedAt: new Date() },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `zernio: failed to mirror published status onto content_post ${contentPostId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private async pollOnePost(
+    publishedPostId: string,
+    zernioPostId: string,
+    contentPostId: string,
+  ): Promise<void> {
     try {
       const data = await this.apiGet<{ post: ZernioPostPayload }>(
         `/posts/${encodeURIComponent(zernioPostId)}`,
@@ -93,6 +121,7 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
           where: { id: publishedPostId },
           data: { status: 'published', publishedAt: new Date(), platformPostId },
         });
+        await this.markContentPostPublished(contentPostId);
         this.gateway.notifyRoom(`publish:${publishedPostId}`, 'publish.status_changed', {
           publishedPostId,
           status: 'published',
@@ -381,6 +410,9 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
               platformPostId: post.platformPostUrl ?? null,
             },
           });
+          if (existing?.contentPostId) {
+            await this.markContentPostPublished(existing.contentPostId);
+          }
           this.gateway.notifyRoom(
             `publish:${input.publishedPostId}`,
             'publish.status_changed',
@@ -642,6 +674,10 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
         errorMessage,
       },
     });
+
+    if (dbStatus === 'published') {
+      await this.markContentPostPublished(record.contentPostId);
+    }
 
     this.gateway.notifyRoom(`publish:${record.id}`, 'publish.status_changed', {
       publishedPostId: record.id,
