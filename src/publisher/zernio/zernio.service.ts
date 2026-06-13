@@ -1,9 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
+  HttpException,
   Injectable,
   Logger,
   OnModuleDestroy,
   OnModuleInit,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -274,20 +277,47 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new BadRequestException('User not found');
 
-    const profileId =
-      user.zernioProfileId ??
-      (await this.ensureProfile(userId, user.email, user.displayName));
-
     const callbackBase = this.config.get<string>(
       'TIKTOK_CALLBACK_BASE_URL',
       'http://localhost:3000',
     );
-    const redirectUrl = `${callbackBase}/v1/publisher/tiktok/callback?profileId=${encodeURIComponent(profileId)}`;
+    const connectPath = (profileId: string): string => {
+      const redirectUrl = `${callbackBase}/v1/publisher/tiktok/callback?profileId=${encodeURIComponent(profileId)}`;
+      return `/connect/tiktok?profileId=${encodeURIComponent(profileId)}&redirectUrl=${encodeURIComponent(redirectUrl)}`;
+    };
 
-    const data = await this.apiGet<{ authUrl: string }>(
-      `/connect/tiktok?profileId=${encodeURIComponent(profileId)}&redirectUrl=${encodeURIComponent(redirectUrl)}`,
-    );
-    return data.authUrl;
+    const storedProfileId = user.zernioProfileId;
+    const profileId =
+      storedProfileId ??
+      (await this.ensureProfile(userId, user.email, user.displayName));
+
+    try {
+      const data = await this.apiGet<{ authUrl: string }>(connectPath(profileId));
+      return data.authUrl;
+    } catch (err) {
+      const axErr = err as AxiosError;
+      // A 404 against the *stored* profile id means it's stale — the Zernio
+      // profile was deleted or the API key no longer has access to it (e.g. key
+      // rotated). Drop the dead id + its linked account and recreate, then retry
+      // once. A 404 on a freshly created profile, or any other error, rethrows.
+      if (axErr.response?.status !== 404 || !storedProfileId) throw err;
+
+      this.logger.warn(
+        `zernio: stale profile ${storedProfileId} for user ${userId} — recreating`,
+      );
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { zernioProfileId: null, zernioTiktokAccountId: null, tiktokLinked: false },
+      });
+      this.gateway.notifyRoom(`user:${userId}`, 'tiktok.link_changed', {
+        linked: false,
+        platform: 'tiktok',
+      });
+
+      const freshProfileId = await this.ensureProfile(userId, user.email, user.displayName);
+      const data = await this.apiGet<{ authUrl: string }>(connectPath(freshProfileId));
+      return data.authUrl;
+    }
   }
 
   async handleTikTokCallback(profileId: string): Promise<string> {
@@ -399,17 +429,25 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
         const post = data.post;
         this.logger.log(`zernio: post accepted id=${post._id} status=${post.status}`);
 
-        // If Zernio already published synchronously (publishNow), update DB and
-        // notify the client immediately — don't wait for the webhook.
+        // Persist the provider id immediately so any later retry short-circuits at
+        // the idempotency guard above — even if the response to ai-service is lost.
+        // If Zernio already published synchronously (publishNow), also flip status
+        // and notify the client now instead of waiting for the webhook.
+        await this.prisma.publishedPost.update({
+          where: { id: input.publishedPostId },
+          data: {
+            tiktokPublishId: post._id,
+            ...(post.status === 'published'
+              ? {
+                  status: 'published',
+                  publishedAt: new Date(),
+                  platformPostId: post.platformPostUrl ?? null,
+                }
+              : {}),
+          },
+        });
+
         if (post.status === 'published') {
-          await this.prisma.publishedPost.update({
-            where: { id: input.publishedPostId },
-            data: {
-              status: 'published',
-              publishedAt: new Date(),
-              platformPostId: post.platformPostUrl ?? null,
-            },
-          });
           if (existing?.contentPostId) {
             await this.markContentPostPublished(existing.contentPostId);
           }
@@ -438,7 +476,21 @@ export class ZernioService implements TikTokPublisher, OnModuleInit, OnModuleDes
         }
       }
     }
-    throw lastError;
+
+    // Convert the raw AxiosError to a proper HttpException so the global filter
+    // preserves the downstream status (otherwise it collapses to a generic 500
+    // and ai-service keeps retrying a non-retryable conflict).
+    const axErr = lastError as AxiosError;
+    const status = axErr.response?.status;
+    if (status === 409) {
+      throw new ConflictException(
+        'Zernio: bài đăng đã tồn tại (có thể đã được gửi trước đó) — kiểm tra trên Zernio/TikTok.',
+      );
+    }
+    if (status && status >= 400 && status < 500) {
+      throw new HttpException((axErr.response?.data as object) ?? axErr.message, status);
+    }
+    throw new ServiceUnavailableException('Zernio publish failed after retries');
   }
 
   async cancelScheduled(publishedPostId: string): Promise<void> {

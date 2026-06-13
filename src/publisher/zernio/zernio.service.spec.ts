@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 import { of, throwError } from 'rxjs';
 import { AxiosError, AxiosResponse } from 'axios';
@@ -126,6 +126,65 @@ describe('ZernioService', () => {
           data: { zernioProfileId: 'prof_NEW' },
         }),
       );
+    });
+  });
+
+  describe('generateConnectUrl', () => {
+    it('returns the Zernio authUrl using the stored profileId', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      http.get.mockReturnValue(of(makeAxiosResponse({ authUrl: 'https://zernio.com/oauth/abc' })));
+
+      const url = await service.generateConnectUrl(mockUser.id);
+
+      expect(url).toBe('https://zernio.com/oauth/abc');
+      expect(http.get.mock.calls[0][0]).toContain(`profileId=${mockUser.zernioProfileId}`);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('recreates the profile and retries when the stored profileId is stale (404)', async () => {
+      // generateConnectUrl reads the user (stale id); ensureProfile re-reads it after
+      // we null the id in the DB, so the second read has no profileId → triggers create.
+      prisma.user.findUnique
+        .mockResolvedValueOnce(mockUser)
+        .mockResolvedValueOnce({ ...mockUser, zernioProfileId: null });
+      // 1st /connect/tiktok → 404 (stale), profile recreate POST → new id, 2nd /connect/tiktok → 200
+      http.get
+        .mockReturnValueOnce(throwError(() => makeAxiosError(404, { error: 'Profile not found' })))
+        .mockReturnValueOnce(of(makeAxiosResponse({ authUrl: 'https://zernio.com/oauth/fresh' })));
+      http.post.mockReturnValue(of(makeAxiosResponse({ profile: { _id: 'prof_FRESH', name: 'x' } })));
+      prisma.user.update.mockResolvedValue({});
+
+      const url = await service.generateConnectUrl(mockUser.id);
+
+      expect(url).toBe('https://zernio.com/oauth/fresh');
+      // stale fields cleared
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { zernioProfileId: null, zernioTiktokAccountId: null, tiktokLinked: false },
+        }),
+      );
+      // fresh profile persisted, retry used it
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { zernioProfileId: 'prof_FRESH' } }),
+      );
+      expect(http.get.mock.calls[1][0]).toContain('profileId=prof_FRESH');
+      expect(gateway.notifyRoom).toHaveBeenCalledWith(
+        `user:${mockUser.id}`,
+        'tiktok.link_changed',
+        expect.objectContaining({ linked: false }),
+      );
+    });
+
+    it('does not loop: a 404 on a freshly created profile rethrows', async () => {
+      prisma.user.findUnique.mockResolvedValue({ ...mockUser, zernioProfileId: null });
+      http.post.mockReturnValue(of(makeAxiosResponse({ profile: { _id: 'prof_NEW', name: 'x' } })));
+      http.get.mockReturnValue(throwError(() => makeAxiosError(404, { error: 'Profile not found' })));
+      prisma.user.update.mockResolvedValue({});
+
+      await expect(service.generateConnectUrl(mockUser.id)).rejects.toBeDefined();
+      // only the initial create — no recreate attempt
+      expect(http.post).toHaveBeenCalledTimes(1);
+      expect(http.get).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -278,6 +337,35 @@ describe('ZernioService', () => {
           imageUrl: 'https://cdn.example.com/i.jpg',
         }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('persists tiktokPublishId immediately when Zernio accepts (non-published status)', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      http.post.mockReturnValue(
+        of(makeAxiosResponse({ post: { _id: 'zernio_post_3', status: 'scheduled' } })),
+      );
+      await service.publishPost({
+        ...baseInput,
+        imageUrl: 'https://cdn.example.com/i.jpg',
+      });
+      expect(prisma.publishedPost.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pub-uuid' },
+          data: expect.objectContaining({ tiktokPublishId: 'zernio_post_3' }),
+        }),
+      );
+    });
+
+    it('surfaces 409 from Zernio as ConflictException (not a raw 500)', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      http.post.mockReturnValue(throwError(() => makeAxiosError(409, { error: 'duplicate' })));
+      await expect(
+        service.publishPost({
+          ...baseInput,
+          imageUrl: 'https://cdn.example.com/i.jpg',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(http.post).toHaveBeenCalledTimes(1);
     });
 
     it('does not retry on 4xx errors (other than 401/403)', async () => {
