@@ -35,14 +35,26 @@ export class MediaService implements OnModuleInit {
         ? 'image'
         : 'raw';
 
+    // Cloudinary's single-request upload endpoint rejects payloads > 100 MB with
+    // HTTP 413. Videos can exceed that, so send them through the chunked endpoint,
+    // which streams the file in parts and has no per-request size cap. Images and
+    // raw assets (e.g. fonts) stay on the simpler single-request upload.
+    const options = {
+      public_id: destKey,
+      resource_type: resourceType,
+      overwrite: true,
+      invalidate: true,
+    } as const;
+
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        { public_id: destKey, resource_type: resourceType, overwrite: true, invalidate: true },
-        (err, result) => {
-          if (err || !result) reject(err ?? new Error('Upload failed'));
-          else resolve(result);
-        },
-      );
+      const handle = (err: unknown, result?: UploadApiResponse) => {
+        if (err || !result) reject(err ?? new Error('Upload failed'));
+        else resolve(result);
+      };
+      const uploadStream =
+        resourceType === 'video'
+          ? cloudinary.uploader.upload_chunked_stream(options, handle)
+          : cloudinary.uploader.upload_stream(options, handle);
       Readable.from(buffer).pipe(uploadStream);
     });
 
